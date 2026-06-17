@@ -1,4 +1,4 @@
-from game.player import Player
+from player import Player
 
 
 class BingoGame:
