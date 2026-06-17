@@ -11,12 +11,12 @@ st.set_page_config(
     layout="wide"
 )
 
-BACKEND_URL = "wss://bingo-backend-2o3a.onrender.com/ws"
+# For local testing:
+BACKEND_URL = "ws://127.0.0.1:8000/ws"
 
+# For deployed app, use this instead:
+# BACKEND_URL = "wss://bingo-backend-2o3a.onrender.com/ws"
 
-# -----------------------------
-# SESSION STATE
-# -----------------------------
 
 defaults = {
     "connected": False,
@@ -42,10 +42,6 @@ for key, value in defaults.items():
 if "room" in st.query_params and st.session_state.room_code == "":
     st.session_state.room_code = st.query_params["room"]
 
-
-# -----------------------------
-# CSS
-# -----------------------------
 
 st.markdown(
     """
@@ -94,16 +90,24 @@ st.markdown(
     }
 
     .marked-cell {
-        height: 46px;
+        min-height: 48px;
         border-radius: 10px;
         background: linear-gradient(135deg, #00C853, #64DD17);
         color: white;
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 800;
         text-align: center;
-        padding-top: 10px;
+        padding-top: 12px;
         text-decoration: line-through;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
+    }
+
+    div[data-testid="stButton"] > button {
+        width: 100%;
+        min-height: 48px;
+        font-size: 18px;
+        font-weight: 800;
+        border-radius: 10px;
     }
 
     .turn-alert {
@@ -158,15 +162,57 @@ st.markdown(
         align-items: center;
         justify-content: center;
     }
+
+    /* MOBILE FIX */
+    @media screen and (max-width: 600px) {
+        .main-title {
+            font-size: 32px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+        }
+
+        section.main > div {
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
+        }
+
+        div[data-testid="column"] {
+            min-width: 19% !important;
+            width: 19% !important;
+            flex: 1 1 19% !important;
+        }
+
+        div[data-testid="stButton"] > button {
+            min-height: 42px;
+            font-size: 15px;
+            padding: 2px;
+        }
+
+        .marked-cell {
+            min-height: 42px;
+            font-size: 15px;
+            padding-top: 10px;
+        }
+
+        .card {
+            padding: 12px;
+        }
+
+        .card h2 {
+            font-size: 18px;
+        }
+
+        .card h3 {
+            font-size: 15px;
+        }
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-
-# -----------------------------
-# FUNCTIONS
-# -----------------------------
 
 def generate_room_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -283,7 +329,7 @@ def render_board(board, marked):
     game_over = st.session_state.winner is not None
 
     for i in range(5):
-        cols = st.columns(5)
+        cols = st.columns(5, gap="small")
 
         for j in range(5):
             number = board[i][j]
@@ -348,18 +394,10 @@ def render_scoreboard():
         render_bingo_letters(player["letters"])
 
 
-# -----------------------------
-# AUTO REFRESH
-# -----------------------------
-
 if st.session_state.connected:
     st_autorefresh(interval=3000, key="game_refresh")
     auto_receive_updates()
 
-
-# -----------------------------
-# HEADER
-# -----------------------------
 
 st.markdown(
     """
@@ -369,10 +407,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
-# -----------------------------
-# CREATE / JOIN ROOM SCREEN
-# -----------------------------
 
 if not st.session_state.connected:
     left, mid, right = st.columns([1, 1.5, 1])
@@ -454,10 +488,6 @@ if not st.session_state.connected:
                     st.error(response["message"])
 
 
-# -----------------------------
-# WAITING ROOM
-# -----------------------------
-
 if st.session_state.connected and not st.session_state.game_started:
     host_name = get_host_name()
 
@@ -489,10 +519,6 @@ if st.session_state.connected and not st.session_state.game_started:
     else:
         st.warning("Waiting for host to start the game.")
 
-
-# -----------------------------
-# GAME SCREEN
-# -----------------------------
 
 if st.session_state.connected and st.session_state.game_started:
     if st.session_state.winner:
