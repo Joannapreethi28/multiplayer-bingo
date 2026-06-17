@@ -308,49 +308,52 @@ h1, h2, h3, h4, h5, h6,
     font-size: 15px;
 }
 
-/* Bingo grid */
-.bingo-grid {
+/* Bingo grid built from native Streamlit buttons (no page reload on click) */
+.st-key-bingoboard [data-testid="stVerticalBlock"] {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 10px;
-    width: 100%;
+    gap: 8px;
     max-width: 520px;
     margin: 0 auto;
 }
-.bingo-cell, .bingo-link {
+.st-key-bingoboard .stButton,
+.st-key-bingoboard .stButton > button {
+    width: 100%;
+    height: 100%;
+}
+.st-key-bingoboard .stButton > button {
     aspect-ratio: 1 / 1;
     min-height: 0;
     border-radius: 12px;
-    border: 2px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
     font-size: 20px;
     font-weight: 800;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    user-select: none;
+    padding: 0;
 }
-.bingo-link {
-    cursor: pointer;
-    transition: transform 0.05s ease, border-color 0.15s ease, background 0.15s ease;
+/* clickable cell */
+[class*="st-key-b_cell_"] button {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+    border: 2px solid var(--border) !important;
 }
-.bingo-link:hover {
-    background: var(--surface-2);
-    border-color: var(--accent);
-    color: var(--text);
+[class*="st-key-b_cell_"] button:hover {
+    border-color: var(--accent) !important;
+    background: var(--surface-2) !important;
 }
-.bingo-link:active { transform: scale(0.96); }
-.bingo-marked {
-    background: linear-gradient(135deg, var(--good), var(--good-2));
-    color: #ffffff;
-    border-color: var(--good);
-    text-decoration: line-through;
+/* marked cell */
+[class*="st-key-b_mark_"] button,
+[class*="st-key-b_mark_"] button:disabled {
+    background: linear-gradient(135deg, var(--good), var(--good-2)) !important;
+    color: #ffffff !important;
+    border: none !important;
+    opacity: 1 !important;
 }
-.bingo-disabled {
-    background: var(--surface-2);
-    color: var(--text-muted);
+/* disabled / not-your-turn cell */
+[class*="st-key-b_dis_"] button,
+[class*="st-key-b_dis_"] button:disabled {
+    background: var(--surface-2) !important;
+    color: var(--text-muted) !important;
+    border: 1px solid var(--border) !important;
+    opacity: 1 !important;
 }
 
 /* Mobile */
@@ -362,11 +365,13 @@ h1, h2, h3, h4, h5, h6,
     }
     .main-title { font-size: 30px; }
     .subtitle { font-size: 14px; margin-bottom: 18px; }
-    .bingo-grid { gap: 6px; max-width: 100%; }
-    .bingo-cell, .bingo-link {
+    .st-key-bingoboard [data-testid="stVerticalBlock"] {
+        gap: 6px;
+        max-width: 100%;
+    }
+    .st-key-bingoboard .stButton > button {
         font-size: 18px;
         border-radius: 9px;
-        border-width: 1.5px;
     }
     .card { padding: 12px; }
     .card h2 { font-size: 19px; }
@@ -557,37 +562,6 @@ def call_number(number):
     st.rerun()
 
 
-def handle_cell_click_from_url():
-    if "call" not in st.query_params:
-        return
-
-    if not st.session_state.connected:
-        return
-
-    try:
-        number = int(st.query_params["call"])
-    except (ValueError, TypeError):
-        return
-
-    room_code = st.session_state.room_code
-
-    st.query_params.clear()
-    st.query_params["room"] = room_code
-
-    if st.session_state.winner:
-        return
-
-    if st.session_state.current_turn != st.session_state.player_name:
-        st.error("Wait for your turn")
-        return
-
-    if number in st.session_state.called_numbers:
-        st.error("Number already called")
-        return
-
-    call_number(number)
-
-
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
@@ -602,30 +576,35 @@ def render_board(board, marked):
         and not st.session_state.connection_lost
     )
 
-    room_code = st.session_state.room_code
+    # Native buttons (not links) so a click reruns the script instead of
+    # reloading the page, which would drop the session and the WebSocket.
+    with st.container(key="bingoboard"):
+        for i in range(5):
+            for j in range(5):
+                number = board[i][j]
 
-    html = '<div class="bingo-grid">'
-
-    for i in range(5):
-        for j in range(5):
-            number = board[i][j]
-
-            if marked[i][j]:
-                html += (
-                    f'<div class="bingo-cell bingo-marked">{number} ✓</div>'
-                )
-            elif can_click:
-                html += (
-                    f'<a class="bingo-link" '
-                    f'href="?room={room_code}&call={number}">{number}</a>'
-                )
-            else:
-                html += (
-                    f'<div class="bingo-cell bingo-disabled">{number}</div>'
-                )
-
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
+                if marked[i][j]:
+                    st.button(
+                        f"{number} ✓",
+                        key=f"b_mark_{i}_{j}",
+                        disabled=True,
+                        use_container_width=True,
+                    )
+                elif can_click:
+                    if st.button(
+                        f"{number}",
+                        key=f"b_cell_{i}_{j}",
+                        use_container_width=True,
+                    ):
+                        if number not in st.session_state.called_numbers:
+                            call_number(number)
+                else:
+                    st.button(
+                        f"{number}",
+                        key=f"b_dis_{i}_{j}",
+                        disabled=True,
+                        use_container_width=True,
+                    )
 
 
 def render_bingo_letters(letters):
@@ -668,7 +647,6 @@ inject_theme()
 if st.session_state.connected and not st.session_state.connection_lost:
     st_autorefresh(interval=3000, key="game_refresh")
     auto_receive_updates()
-    handle_cell_click_from_url()
 
 render_connection_status()
 
