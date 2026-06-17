@@ -233,6 +233,35 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
                 })
 
             # -----------------------------
+            # RESTART GAME (Play Again / Rematch)
+            # -----------------------------
+            elif event == "restart_game":
+                requester = message.get("player_name")
+                host_name = game.players[0].name if game.players else None
+
+                if requester != host_name:
+                    await ws_manager.send_json(websocket, {
+                        "event": "error",
+                        "message": "Only the host can restart the game"
+                    })
+                    continue
+
+                if len(game.players) < 2:
+                    await ws_manager.send_json(websocket, {
+                        "event": "error",
+                        "message": "At least 2 players are needed to restart"
+                    })
+                    continue
+
+                game.reset()
+                game.game_started = True
+
+                await ws_manager.broadcast_json(room_code, {
+                    "event": "game_restarted",
+                    **get_game_state(game)
+                })
+
+            # -----------------------------
             # UNKNOWN EVENT
             # -----------------------------
             else:
@@ -243,3 +272,20 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
 
     except WebSocketDisconnect:
         ws_manager.disconnect(room_code, websocket)
+
+        # Remove the disconnected player so they no longer hold turns and the
+        # game does not stall waiting on someone who has left.
+        if player_name and game.get_player(player_name):
+            game.remove_player(player_name)
+
+            # If everyone is gone, drop the room entirely.
+            if not game.players:
+                if room_code in manager.rooms:
+                    del manager.rooms[room_code]
+            else:
+                await ws_manager.broadcast_json(room_code, {
+                    "event": "player_left",
+                    "player_name": player_name,
+                    **get_game_state(game)
+                })
+
