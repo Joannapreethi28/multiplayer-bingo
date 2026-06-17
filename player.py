@@ -1,4 +1,4 @@
-from game.board import Board
+from board import Board
 
 
 class Player:
