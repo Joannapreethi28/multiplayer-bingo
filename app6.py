@@ -323,35 +323,86 @@ def call_number(number):
 def render_board(board, marked):
     is_my_turn = st.session_state.current_turn == st.session_state.player_name
     game_over = st.session_state.winner is not None
+    can_click = is_my_turn and not game_over and st.session_state.game_started
+
+    st.markdown(
+        """
+        <style>
+        .bingo-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 6px;
+            width: 100%;
+            max-width: 420px;
+            margin: auto;
+        }
+
+        .bingo-cell-mobile {
+            min-height: 52px;
+            border-radius: 10px;
+            background: white;
+            border: 2px solid #ddd;
+            color: #222;
+            font-size: 18px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .bingo-cell-marked {
+            background: linear-gradient(135deg, #00C853, #64DD17);
+            color: white;
+            border: 2px solid #00C853;
+            text-decoration: line-through;
+        }
+
+        @media screen and (max-width: 600px) {
+            .bingo-grid {
+                grid-template-columns: repeat(5, 1fr);
+                gap: 4px;
+                width: 100%;
+                max-width: 100%;
+            }
+
+            .bingo-cell-mobile {
+                min-height: 44px;
+                font-size: 15px;
+                border-radius: 8px;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    html = '<div class="bingo-grid">'
 
     for i in range(5):
-        cols = st.columns(5, gap="small")
-
         for j in range(5):
             number = board[i][j]
 
-            with cols[j]:
-                if marked[i][j]:
-                    st.markdown(
-                        f"""
-                        <div class="marked-cell">
-                            {number} ✓
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                else:
-                    if st.button(
-                        str(number),
-                        key=f"cell_{i}_{j}_{number}",
-                        use_container_width=True,
-                        disabled=(
-                            not is_my_turn
-                            or game_over
-                            or not st.session_state.game_started
-                        )
-                    ):
-                        call_number(number)
+            if marked[i][j]:
+                html += f'<div class="bingo-cell-mobile bingo-cell-marked">{number} ✓</div>'
+            else:
+                html += f'<div class="bingo-cell-mobile">{number}</div>'
+
+    html += '</div>'
+
+    st.markdown(html, unsafe_allow_html=True)
+
+    st.write("")
+
+    if can_click:
+        selected_number = st.selectbox(
+            "Choose number to call",
+            [num for row in board for num in row if num not in st.session_state.called_numbers]
+        )
+
+        if st.button("Call Selected Number", use_container_width=True):
+            call_number(selected_number)
+    else:
+        st.info("Wait for your turn to call a number.")
 
 
 def render_bingo_letters(letters):
