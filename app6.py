@@ -11,11 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# For local testing:
-BACKEND_URL = "ws://127.0.0.1:8000/ws"
-
-# For deployed app, use this instead:
-# BACKEND_URL = "wss://bingo-backend-2o3a.onrender.com/ws"
+BACKEND_URL = "wss://bingo-backend-2o3a.onrender.com/ws"
 
 
 defaults = {
