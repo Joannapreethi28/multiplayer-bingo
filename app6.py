@@ -41,7 +41,69 @@ if "room" in st.query_params and st.session_state.room_code == "":
 
 st.markdown(
     """
-    <style>
+        .letter-pending {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: #eeeeee;
+        color: #777;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .bingo-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 6px;
+        width: 100%;
+        max-width: 520px;
+        margin: auto;
+    }
+
+    .bingo-grid-cell,
+    .bingo-grid-link {
+        min-height: 54px;
+        border-radius: 10px;
+        border: 2px solid #e0e0e0;
+        background: white;
+        color: #222;
+        font-size: 20px;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+    }
+
+    .bingo-grid-marked {
+        background: linear-gradient(135deg, #00C853, #64DD17);
+        color: white;
+        border-color: #00C853;
+        text-decoration: line-through;
+    }
+
+    .bingo-grid-disabled {
+        background: #f5f5f5;
+        color: #999;
+    }
+
+    @media screen and (max-width: 700px) {
+        .bingo-grid {
+            gap: 4px;
+            max-width: 100%;
+        }
+
+        .bingo-grid-cell,
+        .bingo-grid-link {
+            min-height: 42px;
+            font-size: 14px;
+            border-radius: 8px;
+        }
+    }
+
+    </style>
     .main-title {
         text-align: center;
         font-size: 45px;
@@ -342,34 +404,98 @@ def render_board(board, marked):
     is_my_turn = st.session_state.current_turn == st.session_state.player_name
     game_over = st.session_state.winner is not None
 
-    for i in range(5):
-        cols = st.columns(5, gap="small")
+    can_click = (
+        is_my_turn
+        and not game_over
+        and st.session_state.game_started
+    )
 
+    html = '<div class="bingo-grid">'
+
+    for i in range(5):
         for j in range(5):
             number = board[i][j]
 
-            with cols[j]:
-                if marked[i][j]:
-                    st.markdown(
-                        f"""
-                        <div class="marked-cell">
-                            {number} ✓
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                else:
-                    if st.button(
-                        str(number),
-                        key=f"cell_{i}_{j}_{number}",
-                        use_container_width=True,
-                        disabled=(
-                            not is_my_turn
-                            or game_over
-                            or not st.session_state.game_started
-                        )
-                    ):
-                        call_number(number)
+            if marked[i][j]:
+                html += f"""
+                <div class="bingo-grid-cell bingo-grid-marked">
+                    {number} ✓
+                </div>
+                """
+            elif can_click:
+                html += f"""
+                <div class="bingo-grid-link">
+                    {number}
+                </div>
+                """
+            else:
+                html += f"""
+                <div class="bingo-grid-cell bingo-grid-disabled">
+                    {number}
+                </div>
+                """
+
+    html += "</div>"
+
+    st.markdown(html, unsafe_allow_html=True)
+
+    if can_click:
+        st.write("")
+        selected_number = st.selectbox(
+            "Tap number from board, then select here to call",
+            [num for row in board for num in row if num not in st.session_state.called_numbers]
+        )
+
+        if st.button("Call Selected Number", use_container_width=True):
+            call_number(selected_number)
+            def render_board(board, marked):
+    is_my_turn = st.session_state.current_turn == st.session_state.player_name
+    game_over = st.session_state.winner is not None
+
+    can_click = (
+        is_my_turn
+        and not game_over
+        and st.session_state.game_started
+    )
+
+    html = '<div class="bingo-grid">'
+
+    for i in range(5):
+        for j in range(5):
+            number = board[i][j]
+
+            if marked[i][j]:
+                html += f"""
+                <div class="bingo-grid-cell bingo-grid-marked">
+                    {number} ✓
+                </div>
+                """
+            elif can_click:
+                html += f"""
+                <div class="bingo-grid-link">
+                    {number}
+                </div>
+                """
+            else:
+                html += f"""
+                <div class="bingo-grid-cell bingo-grid-disabled">
+                    {number}
+                </div>
+                """
+
+    html += "</div>"
+
+    st.markdown(html, unsafe_allow_html=True)
+
+    if can_click:
+        st.write("")
+        selected_number = st.selectbox(
+            "Tap number from board, then select here to call",
+            [num for row in board for num in row if num not in st.session_state.called_numbers]
+        )
+
+        if st.button("Call Selected Number", use_container_width=True):
+            call_number(selected_number)
 
 
 def render_bingo_letters(letters):
