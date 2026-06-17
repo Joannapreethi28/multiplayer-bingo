@@ -1,4 +1,4 @@
-from game.bingo_game import BingoGame
+from bingo_game import BingoGame
 
 
 class GameManager:
