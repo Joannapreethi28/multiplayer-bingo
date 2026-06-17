@@ -41,69 +41,7 @@ if "room" in st.query_params and st.session_state.room_code == "":
 
 st.markdown(
     """
-        .letter-pending {
-        width: 38px;
-        height: 38px;
-        border-radius: 50%;
-        background: #eeeeee;
-        color: #777;
-        font-weight: 800;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .bingo-grid {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 6px;
-        width: 100%;
-        max-width: 520px;
-        margin: auto;
-    }
-
-    .bingo-grid-cell,
-    .bingo-grid-link {
-        min-height: 54px;
-        border-radius: 10px;
-        border: 2px solid #e0e0e0;
-        background: white;
-        color: #222;
-        font-size: 20px;
-        font-weight: 800;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-decoration: none;
-    }
-
-    .bingo-grid-marked {
-        background: linear-gradient(135deg, #00C853, #64DD17);
-        color: white;
-        border-color: #00C853;
-        text-decoration: line-through;
-    }
-
-    .bingo-grid-disabled {
-        background: #f5f5f5;
-        color: #999;
-    }
-
-    @media screen and (max-width: 700px) {
-        .bingo-grid {
-            gap: 4px;
-            max-width: 100%;
-        }
-
-        .bingo-grid-cell,
-        .bingo-grid-link {
-            min-height: 42px;
-            font-size: 14px;
-            border-radius: 8px;
-        }
-    }
-
-    </style>
+    <style>
     .main-title {
         text-align: center;
         font-size: 45px;
@@ -145,27 +83,6 @@ st.markdown(
         font-size: 30px;
         font-weight: 800;
         margin-bottom: 20px;
-    }
-
-    .marked-cell {
-        min-height: 48px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #00C853, #64DD17);
-        color: white;
-        font-size: 18px;
-        font-weight: 800;
-        text-align: center;
-        padding-top: 12px;
-        text-decoration: line-through;
-        margin-bottom: 6px;
-    }
-
-    div[data-testid="stButton"] > button {
-        width: 100%;
-        min-height: 48px;
-        font-size: 18px;
-        font-weight: 800;
-        border-radius: 10px;
     }
 
     .turn-alert {
@@ -221,7 +138,47 @@ st.markdown(
         justify-content: center;
     }
 
-    /* PHONE PORTRAIT FIX */
+    .bingo-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px;
+        width: 100%;
+        max-width: 520px;
+        margin: auto;
+    }
+
+    .bingo-cell,
+    .bingo-link {
+        min-height: 56px;
+        border-radius: 12px;
+        border: 2px solid #e0e0e0;
+        background: white;
+        color: #222;
+        font-size: 20px;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+    }
+
+    .bingo-link:hover {
+        background: #f0efff;
+        border-color: #6C63FF;
+    }
+
+    .bingo-marked {
+        background: linear-gradient(135deg, #00C853, #64DD17);
+        color: white;
+        border-color: #00C853;
+        text-decoration: line-through;
+    }
+
+    .bingo-disabled {
+        background: #f5f5f5;
+        color: #999;
+    }
+
     @media screen and (max-width: 700px) {
         .main-title {
             font-size: 30px;
@@ -232,56 +189,33 @@ st.markdown(
         }
 
         section.main > div {
-            padding-left: 0.3rem;
-            padding-right: 0.3rem;
+            padding-left: 0.4rem;
+            padding-right: 0.4rem;
         }
 
-        div[data-testid="column"] {
-            min-width: 19% !important;
-            width: 19% !important;
-            flex: 1 1 19% !important;
-            padding-left: 2px !important;
-            padding-right: 2px !important;
+        .bingo-grid {
+            gap: 4px;
+            width: 100%;
+            max-width: 100%;
         }
 
-        div[data-testid="stHorizontalBlock"] {
-            gap: 4px !important;
-            flex-wrap: nowrap !important;
-        }
-
-        div[data-testid="stButton"] > button {
-            min-height: 42px;
+        .bingo-cell,
+        .bingo-link {
+            min-height: 43px;
             font-size: 14px;
-            padding: 1px;
             border-radius: 8px;
-        }
-
-        .marked-cell {
-            min-height: 42px;
-            font-size: 14px;
-            padding-top: 10px;
-            border-radius: 8px;
-            margin-bottom: 4px;
         }
 
         .card {
-            padding: 10px;
+            padding: 12px;
         }
 
         .card h2 {
-            font-size: 16px;
+            font-size: 18px;
         }
 
         .card h3 {
-            font-size: 14px;
-        }
-
-        .join-card {
-            padding: 18px;
-        }
-
-        .join-card h2 {
-            font-size: 22px;
+            font-size: 15px;
         }
     }
     </style>
@@ -301,7 +235,6 @@ def get_ws_url(room_code):
 def wait_for_event(ws, wanted_events):
     while True:
         response = json.loads(ws.recv())
-
         if response["event"] in wanted_events:
             return response
 
@@ -327,7 +260,6 @@ def update_from_response(response):
 
     if "boards" in response:
         name = st.session_state.player_name
-
         if name in response["boards"]:
             st.session_state.board = response["boards"][name]["board"]
             st.session_state.marked = response["boards"][name]["marked"]
@@ -400,6 +332,37 @@ def call_number(number):
     st.rerun()
 
 
+def handle_cell_click_from_url():
+    if "call" not in st.query_params:
+        return
+
+    if not st.session_state.connected:
+        return
+
+    try:
+        number = int(st.query_params["call"])
+    except:
+        return
+
+    room_code = st.session_state.room_code
+
+    st.query_params.clear()
+    st.query_params["room"] = room_code
+
+    if st.session_state.winner:
+        return
+
+    if st.session_state.current_turn != st.session_state.player_name:
+        st.error("Wait for your turn")
+        return
+
+    if number in st.session_state.called_numbers:
+        st.error("Number already called")
+        return
+
+    call_number(number)
+
+
 def render_board(board, marked):
     is_my_turn = st.session_state.current_turn == st.session_state.player_name
     game_over = st.session_state.winner is not None
@@ -410,53 +373,7 @@ def render_board(board, marked):
         and st.session_state.game_started
     )
 
-    html = '<div class="bingo-grid">'
-
-    for i in range(5):
-        for j in range(5):
-            number = board[i][j]
-
-            if marked[i][j]:
-                html += f"""
-                <div class="bingo-grid-cell bingo-grid-marked">
-                    {number} ✓
-                </div>
-                """
-            elif can_click:
-                html += f"""
-                <div class="bingo-grid-link">
-                    {number}
-                </div>
-                """
-            else:
-                html += f"""
-                <div class="bingo-grid-cell bingo-grid-disabled">
-                    {number}
-                </div>
-                """
-
-    html += "</div>"
-
-    st.markdown(html, unsafe_allow_html=True)
-
-    if can_click:
-        st.write("")
-        selected_number = st.selectbox(
-            "Tap number from board, then select here to call",
-            [num for row in board for num in row if num not in st.session_state.called_numbers]
-        )
-
-        if st.button("Call Selected Number", use_container_width=True):
-            call_number(selected_number)
-            def render_board(board, marked):
-    is_my_turn = st.session_state.current_turn == st.session_state.player_name
-    game_over = st.session_state.winner is not None
-
-    can_click = (
-        is_my_turn
-        and not game_over
-        and st.session_state.game_started
-    )
+    room_code = st.session_state.room_code
 
     html = '<div class="bingo-grid">'
 
@@ -466,19 +383,19 @@ def render_board(board, marked):
 
             if marked[i][j]:
                 html += f"""
-                <div class="bingo-grid-cell bingo-grid-marked">
+                <div class="bingo-cell bingo-marked">
                     {number} ✓
                 </div>
                 """
             elif can_click:
                 html += f"""
-                <div class="bingo-grid-link">
+                <a class="bingo-link" href="?room={room_code}&call={number}">
                     {number}
-                </div>
+                </a>
                 """
             else:
                 html += f"""
-                <div class="bingo-grid-cell bingo-grid-disabled">
+                <div class="bingo-cell bingo-disabled">
                     {number}
                 </div>
                 """
@@ -486,16 +403,6 @@ def render_board(board, marked):
     html += "</div>"
 
     st.markdown(html, unsafe_allow_html=True)
-
-    if can_click:
-        st.write("")
-        selected_number = st.selectbox(
-            "Tap number from board, then select here to call",
-            [num for row in board for num in row if num not in st.session_state.called_numbers]
-        )
-
-        if st.button("Call Selected Number", use_container_width=True):
-            call_number(selected_number)
 
 
 def render_bingo_letters(letters):
@@ -537,6 +444,7 @@ def render_scoreboard():
 if st.session_state.connected:
     st_autorefresh(interval=3000, key="game_refresh")
     auto_receive_updates()
+    handle_cell_click_from_url()
 
 
 st.markdown(
@@ -573,7 +481,7 @@ if not st.session_state.connected:
             st.rerun()
 
         if st.session_state.room_code:
-            join_link = f"https://YOUR-STREAMLIT-APP-URL.streamlit.app/?room={st.session_state.room_code}"
+            join_link = f"?room={st.session_state.room_code}"
 
             st.success(f"Room Code: {st.session_state.room_code}")
             st.code(join_link, language="text")
@@ -723,7 +631,7 @@ if st.session_state.connected and st.session_state.game_started:
             st.markdown(
                 """
                 <div class="turn-alert">
-                    Your turn! Click a number from your board.
+                    Your turn! Tap a number from your board.
                 </div>
                 """,
                 unsafe_allow_html=True
