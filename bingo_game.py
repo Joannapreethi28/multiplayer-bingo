@@ -1,4 +1,5 @@
 from player import Player
+from board import Board
 
 
 class BingoGame:
@@ -10,6 +11,44 @@ class BingoGame:
 
     def add_player(self, name):
         self.players.append(Player(name))
+
+    def remove_player(self, name):
+        """Remove a player (e.g. on disconnect) and keep the turn index valid.
+
+        Removing a player who sits before the current player would shift every
+        later index down by one, so we adjust current_turn to keep pointing at
+        the same person. If the current player is removed, the turn naturally
+        falls to whoever now occupies that slot.
+        """
+        index = None
+        for i, player in enumerate(self.players):
+            if player.name == name:
+                index = i
+                break
+
+        if index is None:
+            return False
+
+        self.players.pop(index)
+
+        if not self.players:
+            self.current_turn = 0
+            return True
+
+        if index < self.current_turn:
+            self.current_turn -= 1
+
+        # Clamp in case we removed the last player in the list while it was
+        # their turn.
+        self.current_turn %= len(self.players)
+        return True
+
+    def reset(self):
+        """Start a fresh round: new boards, no called numbers, host goes first."""
+        self.called_numbers = []
+        self.current_turn = 0
+        for player in self.players:
+            player.board = Board()
 
     def get_player(self, name):
         for player in self.players:
@@ -29,20 +68,6 @@ class BingoGame:
 
     def call_number(self, player_name, number):
         current_player = self.get_current_player()
-
-        print("========== TURN DEBUG ==========")
-        print("Room Code:", self.room_code)
-        print("Current Turn Index:", self.current_turn)
-
-        if current_player:
-            print("Current Player:", current_player.name)
-        else:
-            print("Current Player: None")
-
-        print("Player Request:", player_name)
-        print("Players In Room:", [p.name for p in self.players])
-        print("Called Numbers:", self.called_numbers)
-        print("================================")
 
         if current_player is None:
             return False, "No players in game"
