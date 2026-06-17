@@ -1,17 +1,29 @@
-import streamlit as st
-import websocket
+import os
 import json
 import random
 import string
+
+import streamlit as st
+import websocket
+from websocket import (
+    WebSocketTimeoutException,
+    WebSocketConnectionClosedException,
+)
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
     page_title="Multiplayer Bingo",
     page_icon="🎯",
-    layout="wide"
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
-BACKEND_URL = "wss://bingo-backend-2o3a.onrender.com/ws"
+# Backend URL is overridable so the app can be pointed at a local backend
+# (e.g. ws://localhost:8000/ws) during development without editing this file.
+BACKEND_URL = os.environ.get(
+    "BINGO_BACKEND_URL",
+    "wss://bingo-backend-2o3a.onrender.com/ws",
+)
 
 
 defaults = {
@@ -27,7 +39,9 @@ defaults = {
     "scoreboard": [],
     "current_turn": None,
     "winner": None,
-    "celebrated": False
+    "celebrated": False,
+    "theme": "auto",
+    "connection_lost": False,
 }
 
 for key, value in defaults.items():
@@ -39,191 +53,385 @@ if "room" in st.query_params and st.session_state.room_code == "":
     st.session_state.room_code = st.query_params["room"]
 
 
-st.markdown(
-    """
-    <style>
-    .main-title {
-        text-align: center;
-        font-size: 45px;
-        font-weight: 800;
-        color: #6C63FF;
-    }
+# ---------------------------------------------------------------------------
+# Theming
+# ---------------------------------------------------------------------------
+LIGHT = {
+    "--bg": "#eef0f8",
+    "--surface": "#ffffff",
+    "--surface-2": "#f3f4fb",
+    "--text": "#1b1c28",
+    "--text-muted": "#697086",
+    "--border": "#e2e5f0",
+    "--accent": "#6C63FF",
+    "--accent-2": "#8E7CFF",
+    "--good": "#00b84d",
+    "--good-2": "#00C853",
+    "--warn-bg": "#fff3e0",
+    "--warn-fg": "#b25800",
+    "--ok-bg": "#e8f7ed",
+    "--ok-fg": "#1b7a37",
+    "--shadow": "rgba(31, 41, 89, 0.10)",
+}
 
-    .subtitle {
-        text-align: center;
+DARK = {
+    "--bg": "#0e1016",
+    "--surface": "#191c26",
+    "--surface-2": "#222633",
+    "--text": "#e9eaf2",
+    "--text-muted": "#9aa1b6",
+    "--border": "#2c3142",
+    "--accent": "#8b84ff",
+    "--accent-2": "#a99fff",
+    "--good": "#00c95a",
+    "--good-2": "#28d96f",
+    "--warn-bg": "#3a2a12",
+    "--warn-fg": "#ffb766",
+    "--ok-bg": "#16301f",
+    "--ok-fg": "#6fe69a",
+    "--shadow": "rgba(0, 0, 0, 0.45)",
+}
+
+
+def _vars_block(palette):
+    lines = "\n".join(f"  {k}: {v};" for k, v in palette.items())
+    return ":root{\n" + lines + "\n}"
+
+
+def theme_palette_css(theme):
+    if theme == "light":
+        return _vars_block(LIGHT)
+    if theme == "dark":
+        return _vars_block(DARK)
+    # auto: follow the OS / browser preference
+    return _vars_block(LIGHT) + "\n@media (prefers-color-scheme: dark){\n" \
+        + _vars_block(DARK) + "\n}"
+
+
+STATIC_CSS = """
+.stApp,
+[data-testid="stAppViewContainer"] {
+    background: var(--bg);
+    color: var(--text);
+}
+
+[data-testid="stHeader"] {
+    background: transparent;
+}
+
+.block-container {
+    max-width: 900px;
+    padding-top: 1.4rem;
+    padding-bottom: 2rem;
+}
+
+h1, h2, h3, h4, h5, h6,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li {
+    color: var(--text);
+}
+
+.main-title {
+    text-align: center;
+    font-size: 44px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+    text-align: center;
+    font-size: 17px;
+    color: var(--text-muted);
+    margin-bottom: 26px;
+}
+
+/* Inputs */
+[data-testid="stTextInput"] input {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+[data-testid="stTextInput"] input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Buttons */
+.stButton > button {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #ffffff;
+    border: none;
+    border-radius: 12px;
+    font-weight: 700;
+    padding: 0.55rem 1rem;
+    transition: transform 0.05s ease, filter 0.15s ease;
+}
+.stButton > button:hover {
+    filter: brightness(1.05);
+    color: #ffffff;
+}
+.stButton > button:active {
+    transform: translateY(1px);
+}
+.stButton > button:disabled {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    filter: none;
+}
+
+.card {
+    background: var(--surface);
+    padding: 18px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 14px var(--shadow);
+    text-align: center;
+    margin-bottom: 12px;
+    color: var(--text);
+}
+.card h2, .card h3, .card h4 { margin: 4px 0; color: var(--text); }
+.card p { color: var(--text-muted); margin: 2px 0; }
+
+.join-card {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    padding: 24px;
+    border-radius: 18px;
+    color: #ffffff;
+    text-align: center;
+    box-shadow: 0 8px 24px var(--shadow);
+}
+.join-card h2 { color: #ffffff; margin: 0 0 6px 0; }
+.join-card p { color: rgba(255,255,255,0.9); margin: 0; }
+
+.winner-box {
+    background: linear-gradient(135deg, #FFD700, #FFA500);
+    padding: 24px;
+    border-radius: 20px;
+    text-align: center;
+    color: #222;
+    font-size: 28px;
+    font-weight: 800;
+    margin-bottom: 18px;
+    box-shadow: 0 8px 24px var(--shadow);
+}
+
+.turn-alert {
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+    padding: 13px;
+    border-radius: 12px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 14px;
+}
+.wait-alert {
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+    padding: 13px;
+    border-radius: 12px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 14px;
+}
+
+/* Connection status chip */
+.status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 14px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+}
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.dot-on { background: var(--good-2); box-shadow: 0 0 0 4px rgba(0,200,83,0.18); }
+.dot-off { background: #e53935; box-shadow: 0 0 0 4px rgba(229,57,53,0.18); }
+
+/* BINGO letters */
+.letter-row {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin: 8px 0;
+}
+.letter-done, .letter-pending {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.letter-done {
+    background: var(--good);
+    color: #ffffff;
+    text-decoration: line-through;
+}
+.letter-pending {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+
+/* Called numbers as chips */
+.num-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.num-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    height: 34px;
+    padding: 0 8px;
+    border-radius: 9px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 700;
+    font-size: 15px;
+}
+
+/* Bingo grid */
+.bingo-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
+}
+.bingo-cell, .bingo-link {
+    aspect-ratio: 1 / 1;
+    min-height: 0;
+    border-radius: 12px;
+    border: 2px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 20px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    user-select: none;
+}
+.bingo-link {
+    cursor: pointer;
+    transition: transform 0.05s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.bingo-link:hover {
+    background: var(--surface-2);
+    border-color: var(--accent);
+    color: var(--text);
+}
+.bingo-link:active { transform: scale(0.96); }
+.bingo-marked {
+    background: linear-gradient(135deg, var(--good), var(--good-2));
+    color: #ffffff;
+    border-color: var(--good);
+    text-decoration: line-through;
+}
+.bingo-disabled {
+    background: var(--surface-2);
+    color: var(--text-muted);
+}
+
+/* Mobile */
+@media screen and (max-width: 640px) {
+    .block-container {
+        padding-left: 0.6rem;
+        padding-right: 0.6rem;
+        padding-top: 0.8rem;
+    }
+    .main-title { font-size: 30px; }
+    .subtitle { font-size: 14px; margin-bottom: 18px; }
+    .bingo-grid { gap: 6px; max-width: 100%; }
+    .bingo-cell, .bingo-link {
         font-size: 18px;
-        color: #777;
-        margin-bottom: 30px;
+        border-radius: 9px;
+        border-width: 1.5px;
     }
-
-    .card {
-        background: white;
-        padding: 20px;
-        border-radius: 16px;
-        border: 1px solid #e8e8e8;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.08);
-        text-align: center;
-        margin-bottom: 12px;
-    }
-
-    .join-card {
-        background: linear-gradient(135deg, #6C63FF, #8E7CFF);
-        padding: 25px;
-        border-radius: 18px;
-        color: white;
-        text-align: center;
-    }
-
-    .winner-box {
-        background: linear-gradient(135deg, #FFD700, #FFA500);
-        padding: 25px;
-        border-radius: 20px;
-        text-align: center;
-        color: #222;
-        font-size: 30px;
-        font-weight: 800;
-        margin-bottom: 20px;
-    }
-
-    .turn-alert {
-        background: #E8F5E9;
-        color: #1B5E20;
-        padding: 14px;
-        border-radius: 12px;
-        font-weight: 700;
-        text-align: center;
-        margin-bottom: 15px;
-    }
-
-    .wait-alert {
-        background: #FFF3E0;
-        color: #E65100;
-        padding: 14px;
-        border-radius: 12px;
-        font-weight: 700;
-        text-align: center;
-        margin-bottom: 15px;
-    }
-
-    .letter-row {
-        display: flex;
-        justify-content: center;
-        gap: 8px;
-        margin-top: 8px;
-        margin-bottom: 8px;
-    }
-
-    .letter-done {
-        width: 38px;
-        height: 38px;
-        border-radius: 50%;
-        background: #00C853;
-        color: white;
-        font-weight: 800;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-decoration: line-through;
-    }
-
-    .letter-pending {
-        width: 38px;
-        height: 38px;
-        border-radius: 50%;
-        background: #eeeeee;
-        color: #777;
-        font-weight: 800;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .bingo-grid {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 8px;
-        width: 100%;
-        max-width: 520px;
-        margin: auto;
-    }
-
-    .bingo-cell,
-    .bingo-link {
-        min-height: 56px;
-        border-radius: 12px;
-        border: 2px solid #e0e0e0;
-        background: white;
-        color: #222;
-        font-size: 20px;
-        font-weight: 800;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-decoration: none;
-    }
-
-    .bingo-link:hover {
-        background: #f0efff;
-        border-color: #6C63FF;
-    }
-
-    .bingo-marked {
-        background: linear-gradient(135deg, #00C853, #64DD17);
-        color: white;
-        border-color: #00C853;
-        text-decoration: line-through;
-    }
-
-    .bingo-disabled {
-        background: #f5f5f5;
-        color: #999;
-    }
-
-    @media screen and (max-width: 700px) {
-        .main-title {
-            font-size: 30px;
-        }
-
-        .subtitle {
-            font-size: 14px;
-        }
-
-        section.main > div {
-            padding-left: 0.4rem;
-            padding-right: 0.4rem;
-        }
-
-        .bingo-grid {
-            gap: 4px;
-            width: 100%;
-            max-width: 100%;
-        }
-
-        .bingo-cell,
-        .bingo-link {
-            min-height: 43px;
-            font-size: 14px;
-            border-radius: 8px;
-        }
-
-        .card {
-            padding: 12px;
-        }
-
-        .card h2 {
-            font-size: 18px;
-        }
-
-        .card h3 {
-            font-size: 15px;
-        }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+    .card { padding: 12px; }
+    .card h2 { font-size: 19px; }
+    .card h3 { font-size: 14px; }
+    .winner-box { font-size: 22px; padding: 18px; }
+    .num-chip { min-width: 30px; height: 30px; font-size: 14px; }
+    .letter-done, .letter-pending { width: 32px; height: 32px; }
+}
+"""
 
 
+def inject_theme():
+    css = theme_palette_css(st.session_state.theme) + STATIC_CSS
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
+
+def render_sidebar_controls():
+    with st.sidebar:
+        st.markdown("### 🎯 Bingo")
+
+        options = ["Auto", "Light", "Dark"]
+        current = st.session_state.theme.capitalize()
+        if current not in options:
+            current = "Auto"
+
+        choice = st.radio(
+            "Appearance",
+            options,
+            index=options.index(current),
+            horizontal=True,
+        )
+        st.session_state.theme = choice.lower()
+
+
+def render_connection_status():
+    """Show a live connection chip in the sidebar."""
+    if not st.session_state.connected:
+        return
+
+    with st.sidebar:
+        st.divider()
+        if st.session_state.connection_lost:
+            st.markdown(
+                '<div class="status-chip">'
+                '<span class="status-dot dot-off"></span>'
+                'Disconnected</div>',
+                unsafe_allow_html=True,
+            )
+            st.caption("Connection to the server was lost. Refresh to rejoin.")
+        else:
+            st.markdown(
+                '<div class="status-chip">'
+                '<span class="status-dot dot-on"></span>'
+                'Connected</div>',
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                f"Room: {st.session_state.room_code} · "
+                f"You: {st.session_state.player_name}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Networking helpers
+# ---------------------------------------------------------------------------
 def generate_room_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
@@ -257,6 +465,9 @@ def update_from_response(response):
 
     if "winner" in response:
         st.session_state.winner = response["winner"]
+        # New round / cleared winner -> allow the win celebration again.
+        if response["winner"] is None:
+            st.session_state.celebrated = False
 
     if "boards" in response:
         name = st.session_state.player_name
@@ -266,17 +477,27 @@ def update_from_response(response):
 
 
 def auto_receive_updates():
-    if st.session_state.connected and st.session_state.ws is not None:
-        st.session_state.ws.settimeout(0.1)
+    if not (st.session_state.connected and st.session_state.ws is not None):
+        return
 
-        try:
-            while True:
-                response = json.loads(st.session_state.ws.recv())
-                update_from_response(response)
-        except:
-            pass
+    ws = st.session_state.ws
+    ws.settimeout(0.1)
 
-        st.session_state.ws.settimeout(None)
+    try:
+        while True:
+            response = json.loads(ws.recv())
+            update_from_response(response)
+    except WebSocketTimeoutException:
+        # No more pending messages right now.
+        pass
+    except (WebSocketConnectionClosedException, ConnectionError, OSError):
+        st.session_state.connection_lost = True
+        return
+
+    try:
+        ws.settimeout(None)
+    except Exception:
+        st.session_state.connection_lost = True
 
 
 def get_host_name():
@@ -289,46 +510,50 @@ def is_current_user_host():
     return st.session_state.player_name == get_host_name()
 
 
-def send_start_game():
-    message = {
-        "event": "start_game",
-        "player_name": st.session_state.player_name
-    }
-
-    st.session_state.ws.send(json.dumps(message))
-
-    response = wait_for_event(
-        st.session_state.ws,
-        ["game_started", "error"]
-    )
+def _send(message, wanted_events):
+    """Send a message and wait for one of the expected responses."""
+    try:
+        st.session_state.ws.send(json.dumps(message))
+        response = wait_for_event(st.session_state.ws, wanted_events)
+    except (WebSocketConnectionClosedException, ConnectionError, OSError):
+        st.session_state.connection_lost = True
+        st.error("Connection lost. Please refresh to rejoin.")
+        return None
 
     update_from_response(response)
 
     if response["event"] == "error":
         st.error(response["message"])
 
+    return response
+
+
+def send_start_game():
+    _send(
+        {"event": "start_game", "player_name": st.session_state.player_name},
+        ["game_started", "error"],
+    )
+    st.rerun()
+
+
+def send_restart_game():
+    st.session_state.celebrated = False
+    _send(
+        {"event": "restart_game", "player_name": st.session_state.player_name},
+        ["game_restarted", "error"],
+    )
     st.rerun()
 
 
 def call_number(number):
-    message = {
-        "event": "call_number",
-        "player_name": st.session_state.player_name,
-        "number": int(number)
-    }
-
-    st.session_state.ws.send(json.dumps(message))
-
-    response = wait_for_event(
-        st.session_state.ws,
-        ["number_called", "error"]
+    _send(
+        {
+            "event": "call_number",
+            "player_name": st.session_state.player_name,
+            "number": int(number),
+        },
+        ["number_called", "error"],
     )
-
-    update_from_response(response)
-
-    if response["event"] == "error":
-        st.error(response["message"])
-
     st.rerun()
 
 
@@ -341,7 +566,7 @@ def handle_cell_click_from_url():
 
     try:
         number = int(st.query_params["call"])
-    except:
+    except (ValueError, TypeError):
         return
 
     room_code = st.session_state.room_code
@@ -363,6 +588,9 @@ def handle_cell_click_from_url():
     call_number(number)
 
 
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
 def render_board(board, marked):
     is_my_turn = st.session_state.current_turn == st.session_state.player_name
     game_over = st.session_state.winner is not None
@@ -371,6 +599,7 @@ def render_board(board, marked):
         is_my_turn
         and not game_over
         and st.session_state.game_started
+        and not st.session_state.connection_lost
     )
 
     room_code = st.session_state.room_code
@@ -382,26 +611,20 @@ def render_board(board, marked):
             number = board[i][j]
 
             if marked[i][j]:
-                html += f"""
-                <div class="bingo-cell bingo-marked">
-                    {number} ✓
-                </div>
-                """
+                html += (
+                    f'<div class="bingo-cell bingo-marked">{number} ✓</div>'
+                )
             elif can_click:
-                html += f"""
-                <a class="bingo-link" href="?room={room_code}&call={number}">
-                    {number}
-                </a>
-                """
+                html += (
+                    f'<a class="bingo-link" '
+                    f'href="?room={room_code}&call={number}">{number}</a>'
+                )
             else:
-                html += f"""
-                <div class="bingo-cell bingo-disabled">
-                    {number}
-                </div>
-                """
+                html += (
+                    f'<div class="bingo-cell bingo-disabled">{number}</div>'
+                )
 
     html += "</div>"
-
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -410,13 +633,9 @@ def render_bingo_letters(letters):
     completed_count = len(letters)
 
     html = '<div class="letter-row">'
-
     for index, letter in enumerate(bingo):
-        if index < completed_count:
-            html += f'<div class="letter-done">{letter}</div>'
-        else:
-            html += f'<div class="letter-pending">{letter}</div>'
-
+        css = "letter-done" if index < completed_count else "letter-pending"
+        html += f'<div class="{css}">{letter}</div>'
     html += "</div>"
 
     st.markdown(html, unsafe_allow_html=True)
@@ -435,16 +654,23 @@ def render_scoreboard():
                 <p><b>Completed Lines:</b> {player['lines']}</p>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
-
         render_bingo_letters(player["letters"])
 
 
-if st.session_state.connected:
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+render_sidebar_controls()
+inject_theme()
+
+if st.session_state.connected and not st.session_state.connection_lost:
     st_autorefresh(interval=3000, key="game_refresh")
     auto_receive_updates()
     handle_cell_click_from_url()
+
+render_connection_status()
 
 
 st.markdown(
@@ -452,12 +678,12 @@ st.markdown(
     <div class="main-title">Multiplayer Bingo</div>
     <div class="subtitle">Create a room, invite friends, and start the match</div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 
 if not st.session_state.connected:
-    left, mid, right = st.columns([1, 1.5, 1])
+    left, mid, right = st.columns([1, 2, 1])
 
     with mid:
         st.markdown(
@@ -467,11 +693,10 @@ if not st.session_state.connected:
                 <p>Host creates a room. Other players join with the code.</p>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
         st.write("")
-
         st.subheader("Create Room")
 
         if st.button("Create New Room", use_container_width=True):
@@ -482,23 +707,21 @@ if not st.session_state.connected:
 
         if st.session_state.room_code:
             join_link = f"?room={st.session_state.room_code}"
-
             st.success(f"Room Code: {st.session_state.room_code}")
             st.code(join_link, language="text")
 
         st.divider()
-
         st.subheader("Join Room With Code")
 
         room_code = st.text_input(
             "Enter Room Code",
             value=st.session_state.room_code,
-            placeholder="Example: AB12CD"
+            placeholder="Example: AB12CD",
         ).upper()
 
         player_name = st.text_input(
             "Enter Player Name",
-            placeholder="Example: joanna"
+            placeholder="Example: joanna",
         )
 
         if st.button("Join Room", use_container_width=True):
@@ -507,22 +730,29 @@ if not st.session_state.connected:
             elif player_name.strip() == "":
                 st.error("Please enter your name")
             else:
-                ws = websocket.WebSocket()
-                ws.connect(get_ws_url(room_code))
+                try:
+                    ws = websocket.WebSocket()
+                    ws.connect(get_ws_url(room_code))
 
-                ws.send(json.dumps({
-                    "event": "join",
-                    "player_name": player_name
-                }))
+                    ws.send(json.dumps({
+                        "event": "join",
+                        "player_name": player_name,
+                    }))
 
-                response = wait_for_event(
-                    ws,
-                    ["your_board", "error", "room_full"]
-                )
+                    response = wait_for_event(
+                        ws, ["your_board", "error", "room_full"]
+                    )
+                except (WebSocketConnectionClosedException, ConnectionError,
+                        OSError, websocket.WebSocketException) as exc:
+                    st.error(f"Could not connect to the server: {exc}")
+                    response = None
 
-                if response["event"] == "your_board":
+                if response is None:
+                    pass
+                elif response["event"] == "your_board":
                     st.session_state.ws = ws
                     st.session_state.connected = True
+                    st.session_state.connection_lost = False
                     st.session_state.player_name = player_name
                     st.session_state.room_code = room_code
                     st.session_state.board = response["board"]
@@ -540,9 +770,7 @@ if st.session_state.connected and not st.session_state.game_started:
     host_name = get_host_name()
 
     st.subheader(f"Waiting Room: {st.session_state.room_code}")
-
     st.info("Waiting for players. Minimum 2 players required.")
-
     st.subheader("Players Joined")
 
     for player in st.session_state.players:
@@ -561,7 +789,7 @@ if st.session_state.connected and not st.session_state.game_started:
         if st.button(
             "Start Game",
             use_container_width=True,
-            disabled=len(st.session_state.players) < 2
+            disabled=len(st.session_state.players) < 2,
         ):
             send_start_game()
     else:
@@ -573,16 +801,23 @@ if st.session_state.connected and st.session_state.game_started:
         st.markdown(
             f"""
             <div class="winner-box">
-                BINGO!<br>
+                🎉 BINGO! 🎉<br>
                 Winner: {st.session_state.winner}
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
         if not st.session_state.celebrated:
             st.balloons()
             st.session_state.celebrated = True
+
+        # Play Again / Rematch
+        if is_current_user_host():
+            if st.button("🔁 Play Again", use_container_width=True):
+                send_restart_game()
+        else:
+            st.info("Waiting for the host to start a new round.")
 
     top1, top2, top3 = st.columns(3)
 
@@ -595,7 +830,7 @@ if st.session_state.connected and st.session_state.game_started:
                 <p>Room: {st.session_state.room_code}</p>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     with top2:
@@ -606,7 +841,7 @@ if st.session_state.connected and st.session_state.game_started:
                 <h2>{st.session_state.current_turn}</h2>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     with top3:
@@ -617,49 +852,43 @@ if st.session_state.connected and st.session_state.game_started:
                 <h2>{len(st.session_state.called_numbers)} Numbers</h2>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
-    left_col, right_col = st.columns([2, 1])
+    st.subheader("Your Bingo Board")
 
-    with left_col:
-        st.subheader("Your Bingo Board")
+    if st.session_state.winner:
+        st.success("Game over!")
+    elif st.session_state.connection_lost:
+        st.error("Disconnected from the server. Refresh to rejoin.")
+    elif st.session_state.current_turn == st.session_state.player_name:
+        st.markdown(
+            '<div class="turn-alert">Your turn! Tap a number from your board.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="wait-alert">Please wait for your turn.</div>',
+            unsafe_allow_html=True,
+        )
 
-        if st.session_state.winner:
-            st.success("Game over!")
-        elif st.session_state.current_turn == st.session_state.player_name:
-            st.markdown(
-                """
-                <div class="turn-alert">
-                    Your turn! Tap a number from your board.
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        else:
-            st.markdown(
-                """
-                <div class="wait-alert">
-                    Please wait for your turn.
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
+    if st.session_state.board and st.session_state.marked:
         render_board(st.session_state.board, st.session_state.marked)
 
-    with right_col:
-        st.subheader("Called Numbers")
+    st.divider()
+    st.subheader("Called Numbers")
 
-        if st.session_state.called_numbers:
-            nums = " ".join(
-                [f"`{num}`" for num in st.session_state.called_numbers]
-            )
-            st.markdown(nums)
-        else:
-            st.info("No numbers called yet")
+    if st.session_state.called_numbers:
+        chips = "".join(
+            f'<span class="num-chip">{num}</span>'
+            for num in st.session_state.called_numbers
+        )
+        st.markdown(f'<div class="num-wrap">{chips}</div>',
+                    unsafe_allow_html=True)
+    else:
+        st.info("No numbers called yet")
 
-        st.divider()
-
-        st.subheader("Scoreboard")
-        render_scoreboard()
+    st.divider()
+    st.subheader("Scoreboard")
+    render_scoreboard()
