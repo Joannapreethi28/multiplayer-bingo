@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import json
 
-from game.game_manager import GameManager
+from game_manager import GameManager
 
 app = FastAPI()
 manager = GameManager()
