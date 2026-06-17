@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+streamlit
+websocket-client
+streamlit-autorefresh
+pandas
