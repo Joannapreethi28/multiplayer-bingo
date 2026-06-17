@@ -308,18 +308,24 @@ h1, h2, h3, h4, h5, h6,
     font-size: 15px;
 }
 
-/* Bingo grid built from native Streamlit buttons (no page reload on click) */
-.st-key-bingoboard [data-testid="stVerticalBlock"] {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 8px;
+/* Bingo grid built from native Streamlit buttons (no page reload on click).
+   Each row is an st.columns(5); we force the 5 columns to stay side by side
+   (Streamlit would otherwise let them wrap on narrow screens) and make every
+   button a square. */
+.st-key-bingoboard [data-testid="stHorizontalBlock"] {
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
     max-width: 520px;
-    margin: 0 auto;
+    margin: 0 auto 8px auto;
+}
+.st-key-bingoboard [data-testid="stColumn"] {
+    min-width: 0 !important;
+    width: auto !important;
+    flex: 1 1 0 !important;
 }
 .st-key-bingoboard .stButton,
 .st-key-bingoboard .stButton > button {
     width: 100%;
-    height: 100%;
 }
 .st-key-bingoboard .stButton > button {
     aspect-ratio: 1 / 1;
@@ -365,13 +371,13 @@ h1, h2, h3, h4, h5, h6,
     }
     .main-title { font-size: 30px; }
     .subtitle { font-size: 14px; margin-bottom: 18px; }
-    .st-key-bingoboard [data-testid="stVerticalBlock"] {
-        gap: 6px;
+    .st-key-bingoboard [data-testid="stHorizontalBlock"] {
+        gap: 5px !important;
         max-width: 100%;
     }
     .st-key-bingoboard .stButton > button {
-        font-size: 18px;
-        border-radius: 9px;
+        font-size: 16px;
+        border-radius: 8px;
     }
     .card { padding: 12px; }
     .card h2 { font-size: 19px; }
@@ -578,33 +584,36 @@ def render_board(board, marked):
 
     # Native buttons (not links) so a click reruns the script instead of
     # reloading the page, which would drop the session and the WebSocket.
+    # One st.columns(5) per row keeps a reliable 5x5 layout.
     with st.container(key="bingoboard"):
         for i in range(5):
+            cols = st.columns(5, gap="small")
             for j in range(5):
                 number = board[i][j]
 
-                if marked[i][j]:
-                    st.button(
-                        f"{number} ✓",
-                        key=f"b_mark_{i}_{j}",
-                        disabled=True,
-                        use_container_width=True,
-                    )
-                elif can_click:
-                    if st.button(
-                        f"{number}",
-                        key=f"b_cell_{i}_{j}",
-                        use_container_width=True,
-                    ):
-                        if number not in st.session_state.called_numbers:
-                            call_number(number)
-                else:
-                    st.button(
-                        f"{number}",
-                        key=f"b_dis_{i}_{j}",
-                        disabled=True,
-                        use_container_width=True,
-                    )
+                with cols[j]:
+                    if marked[i][j]:
+                        st.button(
+                            f"{number} ✓",
+                            key=f"b_mark_{i}_{j}",
+                            disabled=True,
+                            use_container_width=True,
+                        )
+                    elif can_click:
+                        if st.button(
+                            f"{number}",
+                            key=f"b_cell_{i}_{j}",
+                            use_container_width=True,
+                        ):
+                            if number not in st.session_state.called_numbers:
+                                call_number(number)
+                    else:
+                        st.button(
+                            f"{number}",
+                            key=f"b_dis_{i}_{j}",
+                            disabled=True,
+                            use_container_width=True,
+                        )
 
 
 def render_bingo_letters(letters):
