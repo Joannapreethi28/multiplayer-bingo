@@ -1,5 +1,7 @@
+
 import os
 import json
+import time
 import random
 import string
 
@@ -451,11 +453,40 @@ def get_ws_url(room_code):
     return f"{BACKEND_URL}/{room_code}"
 
 
-def wait_for_event(ws, wanted_events):
-    while True:
-        response = json.loads(ws.recv())
-        if response["event"] in wanted_events:
-            return response
+def _recv_json(ws, timeout):
+    """Receive one JSON message, or None if nothing arrives within `timeout`.
+
+    Crucially this never blocks longer than `timeout` seconds, so a missing or
+    unexpected message can never freeze the whole Streamlit session.
+    """
+    try:
+        ws.settimeout(timeout)
+        return json.loads(ws.recv())
+    except WebSocketTimeoutException:
+        return None
+    except (WebSocketConnectionClosedException, ConnectionError, OSError):
+        st.session_state.connection_lost = True
+        return None
+
+
+def wait_for_event(ws, wanted_events, timeout=12.0):
+    """Wait (bounded) for one of `wanted_events`, processing everything seen.
+
+    Returns the matching message, or None on timeout / disconnect. Every message
+    received along the way is fed through update_from_response so state stays
+    fresh and nothing is silently dropped.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        msg = _recv_json(ws, 0.4)
+        if msg is None:
+            if st.session_state.connection_lost:
+                return None
+            continue
+        update_from_response(msg)
+        if msg.get("event") in wanted_events:
+            return msg
+    return None
 
 
 def update_from_response(response):
@@ -492,23 +523,16 @@ def auto_receive_updates():
         return
 
     ws = st.session_state.ws
-    ws.settimeout(0.1)
 
-    try:
-        while True:
-            response = json.loads(ws.recv())
-            update_from_response(response)
-    except WebSocketTimeoutException:
-        # No more pending messages right now.
-        pass
-    except (WebSocketConnectionClosedException, ConnectionError, OSError):
-        st.session_state.connection_lost = True
-        return
-
-    try:
-        ws.settimeout(None)
-    except Exception:
-        st.session_state.connection_lost = True
+    # Drain everything that is immediately available, then stop. Each read is
+    # time-bounded, so this can never block the session.
+    deadline = time.time() + 0.4
+    while time.time() < deadline:
+        msg = _recv_json(ws, 0.1)
+        if msg is None:
+            # Either a timeout (nothing pending) or a dropped connection.
+            return
+        update_from_response(msg)
 
 
 def get_host_name():
@@ -522,19 +546,27 @@ def is_current_user_host():
 
 
 def _send(message, wanted_events):
-    """Send a message and wait for one of the expected responses."""
+    """Send a message and wait (bounded) for one of the expected responses.
+
+    If no reply arrives in time we simply return; the 3-second auto-refresh
+    will pick up the broadcast state shortly after. We never block forever.
+    """
+    ws = st.session_state.ws
+
     try:
-        st.session_state.ws.send(json.dumps(message))
-        response = wait_for_event(st.session_state.ws, wanted_events)
+        ws.send(json.dumps(message))
     except (WebSocketConnectionClosedException, ConnectionError, OSError):
         st.session_state.connection_lost = True
         st.error("Connection lost. Please refresh to rejoin.")
         return None
 
-    update_from_response(response)
+    response = wait_for_event(ws, list(wanted_events) + ["error"], timeout=8.0)
 
-    if response["event"] == "error":
-        st.error(response["message"])
+    if response is None:
+        return None
+
+    if response.get("event") == "error":
+        st.error(response.get("message", "Something went wrong"))
 
     return response
 
@@ -717,25 +749,35 @@ if not st.session_state.connected:
             elif player_name.strip() == "":
                 st.error("Please enter your name")
             else:
+                response = None
                 try:
-                    ws = websocket.WebSocket()
-                    ws.connect(get_ws_url(room_code))
+                    with st.spinner("Connecting to the server… "
+                                    "(it may take a moment to wake up)"):
+                        ws = websocket.create_connection(
+                            get_ws_url(room_code), timeout=25
+                        )
+                        st.session_state.connection_lost = False
 
-                    ws.send(json.dumps({
-                        "event": "join",
-                        "player_name": player_name,
-                    }))
+                        ws.send(json.dumps({
+                            "event": "join",
+                            "player_name": player_name,
+                        }))
 
-                    response = wait_for_event(
-                        ws, ["your_board", "error", "room_full"]
-                    )
+                        response = wait_for_event(
+                            ws,
+                            ["your_board", "error", "room_full"],
+                            timeout=25.0,
+                        )
                 except (WebSocketConnectionClosedException, ConnectionError,
                         OSError, websocket.WebSocketException) as exc:
                     st.error(f"Could not connect to the server: {exc}")
                     response = None
 
                 if response is None:
-                    pass
+                    st.error(
+                        "The server didn't respond in time. It may be waking "
+                        "up — please try Join again in a few seconds."
+                    )
                 elif response["event"] == "your_board":
                     st.session_state.ws = ws
                     st.session_state.connected = True
