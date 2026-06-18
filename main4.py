@@ -288,4 +288,3 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
                     "player_name": player_name,
                     **get_game_state(game)
                 })
-
