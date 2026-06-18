@@ -5,8 +5,6 @@ import socket
 import random
 import string
 
-
-
 import streamlit as st
 import websocket
 from websocket import (
@@ -458,16 +456,30 @@ def get_ws_url(room_code):
 def _recv_json(ws, timeout):
     """Receive one JSON message, or None if nothing arrives within `timeout`.
 
-    Crucially this never blocks longer than `timeout` seconds, so a missing or
-    unexpected message can never freeze the whole Streamlit session.
+    A read timeout is a normal, expected event (no message waiting) and must NOT
+    be treated as a disconnect -- doing so would stop the auto-refresh and freeze
+    the game. We only flag the connection as lost on a genuine close.
     """
     try:
         ws.settimeout(timeout)
-        return json.loads(ws.recv())
-    except WebSocketTimeoutException:
+        raw = ws.recv()
+    except (WebSocketTimeoutException, socket.timeout, TimeoutError):
+        # Just a read timeout: nothing to read right now. Not a disconnect.
         return None
-    except (WebSocketConnectionClosedException, ConnectionError, OSError):
+    except (WebSocketConnectionClosedException, ConnectionResetError,
+            BrokenPipeError, ConnectionAbortedError):
         st.session_state.connection_lost = True
+        return None
+    except OSError:
+        # Transient OS-level hiccup; don't kill the session, just try again.
+        return None
+
+    if not raw:
+        return None
+
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
         return None
 
 
@@ -754,9 +766,10 @@ if not st.session_state.connected:
                 response = None
                 try:
                     with st.spinner("Connecting to the server… "
-                                    "(it may take a moment to wake up)"):
+                                    "(a sleeping server can take up to a "
+                                    "minute to wake up)"):
                         ws = websocket.create_connection(
-                            get_ws_url(room_code), timeout=25
+                            get_ws_url(room_code), timeout=60
                         )
                         st.session_state.connection_lost = False
 
@@ -768,7 +781,7 @@ if not st.session_state.connected:
                         response = wait_for_event(
                             ws,
                             ["your_board", "error", "room_full"],
-                            timeout=25.0,
+                            timeout=45.0,
                         )
                 except (WebSocketConnectionClosedException, ConnectionError,
                         OSError, websocket.WebSocketException) as exc:
@@ -923,3 +936,4 @@ if st.session_state.connected and st.session_state.game_started:
     st.divider()
     st.subheader("Scoreboard")
     render_scoreboard()
+
